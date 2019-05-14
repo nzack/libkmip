@@ -1422,6 +1422,74 @@ kmip_get_num_items_next(KMIP *ctx, enum tag t)
     return(count);
 }
 
+size_t
+kmip_get_num_attributes_next(KMIP *ctx)
+{
+    if(ctx == NULL)
+    {
+        return(0);
+    }
+
+    size_t count = 0;
+
+    uint8 *index = ctx->index;
+    uint32 length = 0;
+
+    enum tag attribute_tags[] = {
+        KMIP_TAG_UNIQUE_IDENTIFIER,
+        KMIP_TAG_NAME,
+        KMIP_TAG_OBJECT_TYPE,
+        KMIP_TAG_CRYPTOGRAPHIC_ALGORITHM,
+        KMIP_TAG_CRYPTOGRAPHIC_LENGTH,
+        KMIP_TAG_OPERATION_POLICY_NAME,
+        KMIP_TAG_CRYPTOGRAPHIC_USAGE_MASK,
+        KMIP_TAG_STATE
+    };
+
+    while((ctx->size - (ctx->index - ctx->buffer)) > 8)
+    {
+        int attribute_found = 0;
+        for(size_t i = 0; i < ARRAY_LENGTH(attribute_tags); i++)
+        {
+            if(kmip_is_tag_next(ctx, attribute_tags[i]))
+            {
+                attribute_found = 1;
+                break;
+            }
+        }
+
+        if(attribute_found)
+        {
+            ctx->index += 4;
+            
+            length = 0;
+            length |= ((int32)*ctx->index++ << 24);
+            length |= ((int32)*ctx->index++ << 16);
+            length |= ((int32)*ctx->index++ << 8);
+            length |= ((int32)*ctx->index++ << 0);
+            length += CALCULATE_PADDING(length);
+            
+            if((ctx->size - (ctx->index - ctx->buffer)) >= length)
+            {
+                ctx->index += length;
+                count++;
+            }
+            else
+            {
+                break;
+            }
+        }
+        else
+        {
+            ctx->index = index;
+            return(count);
+        }
+    }
+
+    ctx->index = index;
+    return(count);
+}
+
 /*
 Initialization Functions
 */
@@ -7600,13 +7668,11 @@ kmip_encode_attribute_name(KMIP *ctx, enum attribute_type value)
 }
 
 int
-kmip_encode_attribute(KMIP *ctx, const Attribute *value)
+kmip_encode_attribute_v1(KMIP *ctx, const Attribute *value)
 {
-    /* TODO (ph) Check value == NULL? */
-    /* TODO (ph) Cehck value->value == NULL? */
-    
     /* TODO (ph) Add CryptographicParameters support? */
-    
+    CHECK_ENCODE_ARGS(ctx, value);
+
     int result = 0;
     
     result = kmip_encode_int32_be(ctx, TAG_TYPE(KMIP_TAG_ATTRIBUTE, KMIP_TYPE_STRUCTURE));
@@ -7679,6 +7745,159 @@ kmip_encode_attribute(KMIP *ctx, const Attribute *value)
     CHECK_RESULT(ctx, result);
     
     curr_index = ctx->index;
+    ctx->index = length_index;
+    
+    result = kmip_encode_int32_be(ctx, curr_index - value_index);
+    CHECK_RESULT(ctx, result);
+    
+    ctx->index = curr_index;
+    
+    return(KMIP_OK);
+}
+
+int
+kmip_encode_attribute_v2(KMIP *ctx, const Attribute *value)
+{
+    /* TODO (ph) Add CryptographicParameters support? */
+    CHECK_ENCODE_ARGS(ctx, value);
+
+    int result = 0;
+    
+    switch(value->type)
+    {
+        case KMIP_ATTR_UNIQUE_IDENTIFIER:
+        {
+            result = kmip_encode_text_string(
+                ctx,
+                KMIP_TAG_UNIQUE_IDENTIFIER,
+                (TextString*)value->value
+            );
+        }
+        break;
+        
+        case KMIP_ATTR_NAME:
+        {
+            result = kmip_encode_name(ctx, (Name*)value->value);
+        }
+        break;
+        
+        case KMIP_ATTR_OBJECT_TYPE:
+        {
+            result = kmip_encode_enum(
+                ctx,
+                KMIP_TAG_OBJECT_TYPE,
+                *(int32 *)value->value
+            );
+        }
+        break;
+        
+        case KMIP_ATTR_CRYPTOGRAPHIC_ALGORITHM:
+        {
+            result = kmip_encode_enum(
+                ctx,
+                KMIP_TAG_CRYPTOGRAPHIC_ALGORITHM,
+                *(int32 *)value->value
+            );
+        }
+        break;
+        
+        case KMIP_ATTR_CRYPTOGRAPHIC_LENGTH:
+        {
+            result = kmip_encode_integer(
+                ctx,
+                KMIP_TAG_CRYPTOGRAPHIC_LENGTH,
+                *(int32 *)value->value
+            );
+        }
+        break;
+        
+        case KMIP_ATTR_OPERATION_POLICY_NAME:
+        {
+            result = kmip_encode_text_string(
+                ctx,
+                KMIP_TAG_OPERATION_POLICY_NAME,
+                (TextString*)value->value
+            );
+        }
+        break;
+        
+        case KMIP_ATTR_CRYPTOGRAPHIC_USAGE_MASK:
+        {
+            result = kmip_encode_integer(
+                ctx,
+                KMIP_TAG_CRYPTOGRAPHIC_USAGE_MASK,
+                *(int32 *)value->value)
+            ;
+        }
+        break;
+        
+        case KMIP_ATTR_STATE:
+        {
+            result = kmip_encode_enum(
+                ctx,
+                KMIP_TAG_STATE,
+                *(int32 *)value->value
+            );
+        }
+        break;
+        
+        default:
+        {
+            kmip_push_error_frame(ctx, __func__, __LINE__);
+            return(KMIP_ERROR_ATTR_UNSUPPORTED);
+        }
+        break;
+    };
+    CHECK_RESULT(ctx, result);
+    
+    return(KMIP_OK);
+}
+
+int
+kmip_encode_attribute(KMIP *ctx, const Attribute *value)
+{
+    CHECK_ENCODE_ARGS(ctx, value);
+
+    if(ctx->version < KMIP_2_0)
+    {
+        return(kmip_encode_attribute_v1(ctx, value));
+    }
+    else
+    {
+        return(kmip_encode_attribute_v2(ctx, value));
+    }
+}
+
+int
+kmip_encode_attributes(KMIP *ctx, const Attributes *value)
+{
+    CHECK_ENCODE_ARGS(ctx, value);
+
+    int result = 0;
+    
+    result = kmip_encode_int32_be(
+        ctx,
+        TAG_TYPE(KMIP_TAG_ATTRIBUTES, KMIP_TYPE_STRUCTURE)
+    );
+    CHECK_RESULT(ctx, result);
+
+    uint8 *length_index = ctx->index;
+    uint8 *value_index = ctx->index += 4;
+    
+    if(value->attribute_list != NULL)
+    {
+        LinkedListItem *curr = value->attribute_list->head;
+        while(curr != NULL)
+        {
+            Attribute *attribute = (Attribute *)curr->data;
+            result = kmip_encode_attribute(ctx, attribute);
+            CHECK_RESULT(ctx, result);
+
+            curr = curr->next;
+        }
+    }
+    
+    uint8 *curr_index = ctx->index;
     ctx->index = length_index;
     
     result = kmip_encode_int32_be(ctx, curr_index - value_index);
@@ -9421,7 +9640,7 @@ kmip_decode_attribute_name(KMIP *ctx, enum attribute_type *value)
 }
 
 int
-kmip_decode_attribute(KMIP *ctx, Attribute *value)
+kmip_decode_attribute_v1(KMIP *ctx, Attribute *value)
 {
     CHECK_BUFFER_FULL(ctx, 8);
     
@@ -9542,6 +9761,68 @@ kmip_decode_attribute(KMIP *ctx, Attribute *value)
     };
     CHECK_RESULT(ctx, result);
     
+    return(KMIP_OK);
+}
+
+int
+kmip_decode_attribute_v2(KMIP *ctx, Attribute *value)
+{
+    CHECK_DECODE_ARGS(ctx, value);
+
+    return(KMIP_OK);
+}
+
+int
+kmip_decode_attribute(KMIP *ctx, Attribute *value)
+{
+    CHECK_DECODE_ARGS(ctx, value);
+
+    if(ctx->version < KMIP_2_0)
+    {
+        return(kmip_decode_attribute_v1(ctx, value));
+    }
+    else
+    {
+        return(kmip_decode_attribute_v2(ctx, value));
+    }
+}
+
+int
+kmip_decode_attributes(KMIP *ctx, Attributes *value)
+{
+    CHECK_DECODE_ARGS(ctx, value);
+    CHECK_BUFFER_FULL(ctx, 8);
+
+    int result = 0;
+    int32 tag_type = 0;
+    uint32 length = 0;
+    
+    result = kmip_decode_int32_be(ctx, &tag_type);
+    CHECK_RESULT(ctx, result);
+    CHECK_TAG_TYPE(ctx, tag_type, KMIP_TAG_ATTRIBUTES, KMIP_TYPE_STRUCTURE);
+
+    result = kmip_decode_int32_be(ctx, &length);
+    CHECK_RESULT(ctx, result);
+    CHECK_BUFFER_FULL(ctx, length);
+
+    size_t count = kmip_get_num_attributes_next(ctx);
+
+    value->attribute_list = ctx->calloc_func(ctx->state, 1, sizeof(LinkedList));
+    CHECK_NEW_MEMORY(ctx, value->attribute_list, sizeof(LinkedList), "LinkedList");
+
+    for(size_t i = 0; i < count; i++)
+    {
+        LinkedListItem *item = ctx->calloc_func(ctx->state, 1, sizeof(LinkedListItem));
+        CHECK_NEW_MEMORY(ctx, item, sizeof(LinkedListItem), "LinkedListItem");
+        kmip_linked_list_push(value->attribute_list, item);
+
+        item->data = ctx->calloc_func(ctx->state, 1, sizeof(Attribute));
+        CHECK_NEW_MEMORY(ctx, item->data, sizeof(Attribute), "Attribute structure");
+
+        result = kmip_decode_attribute(ctx, (Attribute *)item->data);
+        CHECK_RESULT(ctx, result);
+    }
+
     return(KMIP_OK);
 }
 
