@@ -18,20 +18,21 @@ LIBNAME  = $(LINKNAME).$(VERSION)
 LIBS     = $(LIBNAME) $(ARCNAME)
 
 #CC      = cc -I/usr/local/opt/openssl@1.1/include --verbose
-CC      = cc -I/usr/local/opt/openssl@1.1/include --verbose
-CC      = cc -I/usr/include/openssl --verbose
+#CC      = cc -I/usr/local/opt/openssl@1.1/include --verbose
+CC       = emcc -I/usr/include/openssl -I/usr/include -I/usr/include/x86_64-linux-gnu --verbose
+
 
 #CFLAGS = -std=c11 -pedantic -g3 -Og -Wall -Wextra
-CFLAGS  = -std=c11 -pedantic -g3 -Wall -Wextra
+CFLAGS  = -std=c11 -pedantic -g3 -Wall -Wextra -march=x86_64
 
 LOFLAGS = -fPIC
 
 # Need to rename -soname to -install_name on Mac
-#SOFLAGS = -shared -Wl,-soname,$(SONAME)
-SOFLAGS = -shared -Wl,-install_name,$(SONAME)
+SOFLAGS = -shared -Wl,-soname,$(SONAME)
+#SOFLAGS = -shared -Wl,-install_name,$(SONAME)
 
 #LDFLAGS = -L/usr/local/lib
-LDFLAGS = -L/usr/local/lib -L/usr/local/opt/openssl@1.1/lib
+LDFLAGS = -L/usr/local/lib -L/usr/lib/x86_64-linux-gnu/
 
 LDLIBS  = -lssl -lcrypto
 AR      = ar csrv
